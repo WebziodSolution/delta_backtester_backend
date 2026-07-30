@@ -1,0 +1,9 @@
+# Enable URL Rewriting
+RewriteEngine On
+
+# Avoid rewriting existing files or directories
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+
+# Rewrite everything under api/ to index.php
+RewriteRule ^api/(.*)$ index.php [QSA,L]
