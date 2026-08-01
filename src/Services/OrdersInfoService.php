@@ -11,7 +11,7 @@ class OrdersInfoService {
         return Database::getInstance()->getConnection();
     }
 
-    public static function getById(int $id): array {
+    public static function getById(int $id, ?string $timeZone = null): array {
         $db = self::getDb();
         $stmt = $db->prepare("SELECT id, order_id, order_name, order_type, entry_amount, exit_amount, pnl, broker_fees, qty, status, account_info_id, user_id, created_at, updated_at FROM orders_info WHERE id = :id");
         $stmt->execute(['id' => $id]);
@@ -29,12 +29,33 @@ class OrdersInfoService {
         $order['qty'] = $order['qty'] !== null ? (int)$order['qty'] : null;
         $order['account_info_id'] = $order['account_info_id'] !== null ? (int)$order['account_info_id'] : null;
         $order['user_id'] = $order['user_id'] !== null ? (int)$order['user_id'] : null;
-        $order['created_at'] = $order['created_at'] !== null ? str_replace(' ', 'T', $order['created_at']) : null;
-        $order['updated_at'] = $order['updated_at'] !== null ? str_replace(' ', 'T', $order['updated_at']) : null;
+
+        if ($order['created_at'] !== null) {
+            try {
+                $dt = new \DateTime($order['created_at'], new \DateTimeZone('UTC'));
+                if ($timeZone) {
+                    $dt->setTimezone(new \DateTimeZone($timeZone));
+                }
+                $order['created_at'] = $dt->format('Y-m-d\TH:i:s');
+            } catch (\Exception $e) {
+                $order['created_at'] = str_replace(' ', 'T', $order['created_at']);
+            }
+        }
+        if ($order['updated_at'] !== null) {
+            try {
+                $dt = new \DateTime($order['updated_at'], new \DateTimeZone('UTC'));
+                if ($timeZone) {
+                    $dt->setTimezone(new \DateTimeZone($timeZone));
+                }
+                $order['updated_at'] = $dt->format('Y-m-d\TH:i:s');
+            } catch (\Exception $e) {
+                $order['updated_at'] = str_replace(' ', 'T', $order['updated_at']);
+            }
+        }
         return $order;
     }
 
-    public static function getAll(?int $userId = null, ?int $accountInfoId = null, int $skip = 0, int $limit = 100, ?string $startDate = null, ?string $endDate = null): array {
+    public static function getAll(?int $userId = null, ?int $accountInfoId = null, int $skip = 0, int $limit = 100, ?string $startDate = null, ?string $endDate = null, ?string $timeZone = null): array {
         $db = self::getDb();
         $sql = "SELECT id, order_id, order_name, order_type, entry_amount, exit_amount, pnl, broker_fees, qty, status, account_info_id, user_id, created_at, updated_at FROM orders_info";
         $where = [];
@@ -84,8 +105,29 @@ class OrdersInfoService {
             $row['qty'] = $row['qty'] !== null ? (int)$row['qty'] : null;
             $row['account_info_id'] = $row['account_info_id'] !== null ? (int)$row['account_info_id'] : null;
             $row['user_id'] = $row['user_id'] !== null ? (int)$row['user_id'] : null;
-            $row['created_at'] = $row['created_at'] !== null ? str_replace(' ', 'T', $row['created_at']) : null;
-            $row['updated_at'] = $row['updated_at'] !== null ? str_replace(' ', 'T', $row['updated_at']) : null;
+
+            if ($row['created_at'] !== null) {
+                try {
+                    $dt = new \DateTime($row['created_at'], new \DateTimeZone('UTC'));
+                    if ($timeZone) {
+                        $dt->setTimezone(new \DateTimeZone($timeZone));
+                    }
+                    $row['created_at'] = $dt->format('Y-m-d\TH:i:s');
+                } catch (\Exception $e) {
+                    $row['created_at'] = str_replace(' ', 'T', $row['created_at']);
+                }
+            }
+            if ($row['updated_at'] !== null) {
+                try {
+                    $dt = new \DateTime($row['updated_at'], new \DateTimeZone('UTC'));
+                    if ($timeZone) {
+                        $dt->setTimezone(new \DateTimeZone($timeZone));
+                    }
+                    $row['updated_at'] = $dt->format('Y-m-d\TH:i:s');
+                } catch (\Exception $e) {
+                    $row['updated_at'] = str_replace(' ', 'T', $row['updated_at']);
+                }
+            }
         }
         return $results;
     }

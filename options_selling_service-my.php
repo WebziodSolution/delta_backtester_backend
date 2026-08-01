@@ -30,7 +30,7 @@ DotEnv::load(__DIR__ . '/.env');
 // Set default timezone to Indian Standard Time (Asia/Kolkata)
 date_default_timezone_set('Asia/Kolkata');
 
-define('BASE_URL', "https://api.india.delta.exchange"); // switched from api.delta.exchange — BTCUSD only resolves on the India domain
+define('BASE_URL', "https://api.india.delta.exchange");
 define('FALLBACK_RANGE', 1200);
 define('SEARCH_LIMIT_PCT', 0.030); // 3.0%
 
@@ -61,7 +61,7 @@ function make_public_request_with_retry(string $url, int $timeout = 15, int $ret
         }
 
         $err = curl_error($ch);
-        log_message("Public request to {$url} failed (attempt {$attempt}/{$retries}) - HTTP {$httpCode}: {$err}", "WARNING");
+        log_message("Public request to {$url} failed (attempt {$attempt}/{$retries}): {$err}", "WARNING");
         if ($attempt < $retries) {
             sleep(2);
         }
@@ -74,23 +74,10 @@ function fetch_btc_price(): ?float {
     $url = BASE_URL . "/v2/tickers/BTCUSD";
     try {
         $res = make_public_request_with_retry($url);
-
         if (isset($res['success']) && $res['success']) {
             $ticker = $res['result'] ?? [];
-            $price = floatval($ticker['spot_price'] ?? $ticker['mark_price'] ?? $ticker['close'] ?? 0.0);
-
-            if ($price <= 0.0) {
-                log_message("BTCUSD ticker returned but price fields were empty/zero: " . json_encode($ticker), "ERROR");
-                return null;
-            }
-
-            return $price;
+            return floatval($ticker['spot_price'] ?? $ticker['mark_price'] ?? $ticker['close'] ?? 0.0);
         }
-
-        // FIX: previously this branch logged nothing and just fell through to `return null`,
-        // which is why the caller only ever saw "BTC spot price could not be retrieved"
-        // with no explanation. Now we log Delta's actual response.
-        log_message("BTCUSD ticker request returned success=false: " . json_encode($res), "ERROR");
     } catch (Exception $e) {
         log_message("Failed to fetch BTCUSD ticker spot price: " . $e->getMessage(), "ERROR");
     }
@@ -104,7 +91,6 @@ function fetch_option_tickers(): array {
         if (isset($res['success']) && $res['success']) {
             return $res['result'] ?? [];
         }
-        log_message("Option tickers request returned success=false: " . json_encode($res), "ERROR");
     } catch (Exception $e) {
         log_message("Failed to fetch option tickers from Delta Exchange: " . $e->getMessage(), "ERROR");
     }
@@ -118,7 +104,6 @@ function fetch_active_products(): array {
         if (isset($res['success']) && $res['success']) {
             return $res['result'] ?? [];
         }
-        log_message("Active products request returned success=false: " . json_encode($res), "ERROR");
     } catch (Exception $e) {
         log_message("Failed to fetch active products from Delta Exchange: " . $e->getMessage(), "ERROR");
     }
@@ -149,7 +134,6 @@ function fetch_ticker_for_symbol(string $symbol): ?array {
         if (isset($res['success']) && $res['success']) {
             return $res['result'] ?? null;
         }
-        log_message("Ticker request for {$symbol} returned success=false: " . json_encode($res), "ERROR");
     } catch (Exception $e) {
         log_message("Failed to fetch ticker for symbol {$symbol}: " . $e->getMessage(), "ERROR");
     }
@@ -172,7 +156,7 @@ function run_option_selling_strategy(): void {
     $currentDate = new DateTime();
     $expiryDate = clone $currentDate;
     $expiryDate->modify('+1 day');
-
+    
     $expiryDateStr = $expiryDate->format('Y-m-d');
     $deltaFormattedExpiry = $expiryDate->format('dmy'); // DDMMYY (e.g. 290726)
 
@@ -180,7 +164,7 @@ function run_option_selling_strategy(): void {
 
     // 2. Fetch Open Interest options ticks to determine strike boundaries
     $optionTickers = fetch_option_tickers();
-
+    
     $maxCallOi = 0.0;
     $maxCallStrike = $btcPrice + FALLBACK_RANGE;
     $maxPutOi = 0.0;
@@ -264,7 +248,7 @@ function run_option_selling_strategy(): void {
 
     // 5. Connect DB and process integrations
     $db = Database::getInstance()->getConnection();
-
+    
     // Fetch active accounts
     $stmt = $db->query("SELECT id, user_id, api_key, api_secret, active FROM account_info WHERE active = 1");
     $activeAccounts = $stmt->fetchAll();
@@ -273,7 +257,7 @@ function run_option_selling_strategy(): void {
 
     foreach ($activeAccounts as $account) {
         $userId = intval($account['user_id']);
-
+        
         // Load User email
         try {
             $user = UserService::getById($userId);
@@ -324,7 +308,7 @@ function run_option_selling_strategy(): void {
         list($status, $balancesResp) = $deltaClient->getBalances();
 
         if ($status !== 200 || !isset($balancesResp['success']) || !$balancesResp['success']) {
-            log_message("Failed to fetch balances for account ID {$account['id']}. Status: {$status}, Response: " . json_encode($balancesResp), "ERROR");
+            log_message("Failed to fetch balances for account ID {$account['id']}. Status: {$status}", "ERROR");
             if ($userEmail) {
                 $subject = "Delta Exchange Authentication Error";
                 $html = "<p>Dear {$user['username']},</p>"
@@ -397,7 +381,7 @@ function run_option_selling_strategy(): void {
 
                     list($fillStatus, $fillResp) = $deltaClient->getFills();
                     $fills = ($fillStatus === 200 && isset($fillResp['success']) && $fillResp['success']) ? ($fillResp['result'] ?? []) : [];
-
+                    
                     $totalSize = 0.0;
                     $totalVal = 0.0;
                     $totalFee = 0.0;
@@ -407,7 +391,7 @@ function run_option_selling_strategy(): void {
                             $sz = floatval($f['size'] ?? 0.0);
                             $pr = floatval($f['price'] ?? 0.0);
                             $fe = floatval($f['commission'] ?? $f['fee'] ?? 0.0);
-
+                            
                             $totalSize += $sz;
                             $totalVal += ($pr * $sz);
                             $totalFee += $fe;
@@ -488,7 +472,7 @@ function run_option_selling_strategy(): void {
                           . "<ul>{$ordersHtml}</ul>"
                           . "{$notesHtml}"
                           . "<p>Best regards,<br/>Delta Backtester Automation Service</p>";
-
+                
                 try {
                     EmailService::send($userEmail, $subject, $htmlBody);
                 } catch (Exception $mailEx) {

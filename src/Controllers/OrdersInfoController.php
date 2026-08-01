@@ -23,9 +23,10 @@ class OrdersInfoController {
         $limit = isset($params['limit']) ? intval($params['limit']) : 100;
         $startDate = isset($params['start_date']) ? $params['start_date'] : null;
         $endDate = isset($params['end_date']) ? $params['end_date'] : null;
+        $timeZone = isset($params['time_zone']) ? $params['time_zone'] : null;
 
         try {
-            $orders = OrdersInfoService::getAll($userId, $accountInfoId, $skip, $limit, $startDate, $endDate);
+            $orders = OrdersInfoService::getAll($userId, $accountInfoId, $skip, $limit, $startDate, $endDate, $timeZone);
             ApiResponse::send(200, "Orders retrieved successfully", $orders);
         } catch (Exception $e) {
             ApiResponse::send(500, $e->getMessage());
@@ -34,7 +35,8 @@ class OrdersInfoController {
 
     public function retrieve(int $id): void {
         try {
-            $order = OrdersInfoService::getById($id);
+            $timeZone = isset($_GET['time_zone']) ? $_GET['time_zone'] : null;
+            $order = OrdersInfoService::getById($id, $timeZone);
             ApiResponse::send(200, "Order retrieved successfully", $order);
         } catch (Exception $e) {
             ApiResponse::send($e->getCode() ?: 404, $e->getMessage());

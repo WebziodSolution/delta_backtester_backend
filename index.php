@@ -45,14 +45,15 @@ set_exception_handler(function (Throwable $exception) {
 });
 
 // 4. Configure CORS Headers
-$httpOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$allowedOrigins = ["http://localhost:3000", "http://127.0.0.1:3000"];
-if (in_array($httpOrigin, $allowedOrigins)) {
-    header("Access-Control-Allow-Origin: $httpOrigin");
-} else {
-    // If request has no HTTP_ORIGIN (e.g. Postman), send default or none
-    header("Access-Control-Allow-Origin: http://localhost:3000");
-}
+// $httpOrigin = $_SERVER['HTTP_ORIGIN'] ?? '';
+// $allowedOrigins = ["http://localhost:3000", "http://127.0.0.1:3000","https://deltabacktester.netlify.app"];
+// if (in_array($httpOrigin, $allowedOrigins)) {
+//     header("Access-Control-Allow-Origin: $httpOrigin");
+// } else {
+//     // If request has no HTTP_ORIGIN (e.g. Postman), send default or none
+//     header("Access-Control-Allow-Origin: https://deltabacktester.netlify.app");
+// }
+header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
@@ -204,3 +205,8 @@ if (preg_match('/^\/orders-info\/(\d+)$/', $apiPath, $matches)) {
 ApiResponse::send(404, "Route not found: {$requestMethod} {$apiPath}");
 // C:\xampp\php\php.exe -f C:\xampp\htdocs\deltabacktester\monitor_trade_service.php
 // C:\xampp\php\php.exe -f C:\xampp\htdocs\deltabacktester\options_selling_service.php
+
+// cd domains/
+// cd bhargavdetroja.com/
+// cd public_html/
+// cd delta/

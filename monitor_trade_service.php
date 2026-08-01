@@ -337,7 +337,7 @@ function check_and_monitor_trades(): void {
 
                 // Check gap >= 12h 00m
                 foreach ($groupOrders as $order) {
-                    $createdAtUnix = strtotime($order['created_at']);
+                    $createdAtUnix = (new DateTime($order['created_at'], new DateTimeZone('UTC')))->getTimestamp();
                     $gapSeconds = time() - $createdAtUnix;
 
                     // 12 hours = 43200 seconds
