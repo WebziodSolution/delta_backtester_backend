@@ -24,9 +24,10 @@ class OrdersInfoController {
         $startDate = isset($params['start_date']) ? $params['start_date'] : null;
         $endDate = isset($params['end_date']) ? $params['end_date'] : null;
         $timeZone = isset($params['time_zone']) ? $params['time_zone'] : null;
+        $strategyId = isset($params['strategy_id']) ? intval($params['strategy_id']) : null;
 
         try {
-            $orders = OrdersInfoService::getAll($userId, $accountInfoId, $skip, $limit, $startDate, $endDate, $timeZone);
+            $orders = OrdersInfoService::getAll($userId, $accountInfoId, $skip, $limit, $startDate, $endDate, $timeZone, $strategyId);
             ApiResponse::send(200, "Orders retrieved successfully", $orders);
         } catch (Exception $e) {
             ApiResponse::send(500, $e->getMessage());
@@ -58,6 +59,16 @@ class OrdersInfoController {
             ApiResponse::send(200, "Order deleted successfully", $order);
         } catch (Exception $e) {
             ApiResponse::send($e->getCode() ?: 404, $e->getMessage());
+        }
+    }
+
+    public function performance(int $strategyId): void {
+        $userId = isset($_GET['user_id']) && $_GET['user_id'] !== '' ? intval($_GET['user_id']) : null;
+        try {
+            $metrics = OrdersInfoService::getPerformanceByStrategyId($strategyId, $userId);
+            ApiResponse::send(200, "Performance metrics calculated successfully", $metrics);
+        } catch (Exception $e) {
+            ApiResponse::send($e->getCode() ?: 400, $e->getMessage());
         }
     }
 }

@@ -14,23 +14,24 @@ class AccountInfoService {
 
     public static function getById(int $accountId): array {
         $db = self::getDb();
-        $stmt = $db->prepare("SELECT id, user_id, api_key, api_secret, active, created_date FROM account_info WHERE id = :id");
+        $stmt = $db->prepare("SELECT id, user_id, api_key, api_secret, current_margin, active, created_date FROM account_info WHERE id = :id");
         $stmt->execute(['id' => $accountId]);
         $account = $stmt->fetch();
         if (!$account) {
             throw new Exception("Account info with ID {$accountId} not found", 404);
         }
         
-        // Cast active to bool
+        // Cast values
         $account['active'] = (bool)$account['active'];
         $account['user_id'] = (int)$account['user_id'];
         $account['id'] = (int)$account['id'];
+        $account['current_margin'] = $account['current_margin'] !== null ? (int)$account['current_margin'] : null;
         return $account;
     }
 
     public static function getAll(?int $userId = null, int $skip = 0, int $limit = 100): array {
         $db = self::getDb();
-        $sql = "SELECT id, user_id, api_key, api_secret, active, created_date FROM account_info";
+        $sql = "SELECT id, user_id, api_key, api_secret, current_margin, active, created_date FROM account_info";
         $params = [];
         
         if ($userId !== null) {
@@ -53,6 +54,7 @@ class AccountInfoService {
             $row['active'] = (bool)$row['active'];
             $row['user_id'] = (int)$row['user_id'];
             $row['id'] = (int)$row['id'];
+            $row['current_margin'] = $row['current_margin'] !== null ? (int)$row['current_margin'] : null;
         }
         return $results;
     }
@@ -65,6 +67,8 @@ class AccountInfoService {
         $apiSecret = ValidationHelper::validateNonEmptyStrip($data['api_secret'] ?? '', 'api_secret');
         $active = isset($data['active']) ? (bool)$data['active'] : true;
 
+        $currentMargin = isset($data['current_margin']) && $data['current_margin'] !== null ? (int)$data['current_margin'] : null;
+
         // Verify user exists
         try {
             UserService::getById($userId);
@@ -72,11 +76,12 @@ class AccountInfoService {
             throw new Exception("User with ID {$userId} does not exist", 400);
         }
 
-        $stmt = $db->prepare("INSERT INTO account_info (user_id, api_key, api_secret, active) VALUES (:user_id, :api_key, :api_secret, :active)");
+        $stmt = $db->prepare("INSERT INTO account_info (user_id, api_key, api_secret, current_margin, active) VALUES (:user_id, :api_key, :api_secret, :current_margin, :active)");
         $stmt->execute([
             'user_id' => $userId,
             'api_key' => $apiKey,
             'api_secret' => $apiSecret,
+            'current_margin' => $currentMargin,
             'active' => $active ? 1 : 0
         ]);
 
@@ -109,6 +114,12 @@ class AccountInfoService {
             $params['active'] = $active;
         }
 
+        if (array_key_exists('current_margin', $data)) {
+            $currentMargin = $data['current_margin'] !== null ? (int)$data['current_margin'] : null;
+            $updateFields[] = "current_margin = :current_margin";
+            $params['current_margin'] = $currentMargin;
+        }
+
         if (empty($updateFields)) {
             return $account;
         }
@@ -126,5 +137,61 @@ class AccountInfoService {
         $stmt = $db->prepare("DELETE FROM account_info WHERE id = :id");
         $stmt->execute(['id' => $accountId]);
         return $account;
+    }
+
+    public static function syncCurrentMargin(int $userId): int {
+        $db = self::getDb();
+        
+        // Verify user exists first
+        UserService::getById($userId);
+
+        $stmt = $db->prepare("SELECT id, api_key, api_secret FROM account_info WHERE user_id = :user_id AND active = 1");
+        $stmt->execute(['user_id' => $userId]);
+        $accounts = $stmt->fetchAll();
+
+        $totalMargin = 0;
+
+        foreach ($accounts as $account) {
+            $apiKey = $account['api_key'];
+            $apiSecret = $account['api_secret'];
+            
+            // Call Delta Exchange API to get balance
+            $deltaClient = new \App\Helpers\DeltaClient($apiKey, $apiSecret);
+            list($status, $balancesResp) = $deltaClient->getBalances();
+
+            $margin = 0;
+            if ($status === 200 && isset($balancesResp['success']) && $balancesResp['success']) {
+                $balances = $balancesResp['result'] ?? [];
+                foreach ($balances as $bal) {
+                    if (intval($bal['asset_id'] ?? 0) === 14) {
+                        $margin = (int)($bal['balance'] ?? $bal['available_balance'] ?? 0.0);
+                        break;
+                    }
+                }
+            } else {
+                $errorMsg = null;
+                if (is_array($balancesResp)) {
+                    $errorMsg = $balancesResp['message'] 
+                        ?? $balancesResp['error']['message'] 
+                        ?? $balancesResp['error']['code'] 
+                        ?? (isset($balancesResp['error']) && is_string($balancesResp['error']) ? $balancesResp['error'] : null);
+                }
+                if ($errorMsg === null) {
+                    $errorMsg = json_encode($balancesResp);
+                }
+                throw new Exception("Failed to sync balance for account ID {$account['id']}: {$errorMsg}", $status ?: 400);
+            }
+
+            // Update DB with current margin
+            $upStmt = $db->prepare("UPDATE account_info SET current_margin = :current_margin WHERE id = :id");
+            $upStmt->execute([
+                'current_margin' => $margin,
+                'id' => $account['id']
+            ]);
+
+            $totalMargin += $margin;
+        }
+
+        return $totalMargin;
     }
 }

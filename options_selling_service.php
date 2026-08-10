@@ -297,8 +297,8 @@ function run_option_selling_strategy(): void {
             continue;
         }
 
-        // Fetch trade configuration
-        $configStmt = $db->prepare("SELECT lot, leverage FROM trade_config WHERE user_id = :user_id");
+        // Fetch trade configuration from strategy subscription (strategy_id = 2, margin_allocation is null)
+        $configStmt = $db->prepare("SELECT lot_size as lot, leverage FROM subscribe_strategys WHERE user_id = :user_id AND strategy_id = 2 AND margin_allocation IS NULL");
         $configStmt->execute(['user_id' => $userId]);
         $tradeConfig = $configStmt->fetch();
 
@@ -417,8 +417,8 @@ function run_option_selling_strategy(): void {
                     $avgFillPrice = $totalSize > 0 ? ($totalVal / $totalSize) : $defaultPrice;
 
                     // C. Record transaction details in the database
-                    $insertStmt = $db->prepare("INSERT INTO orders_info (order_id, order_name, order_type, entry_amount, exit_amount, pnl, broker_fees, qty, status, account_info_id, user_id) 
-                                                VALUES (:order_id, :order_name, :order_type, :entry_amount, :exit_amount, :pnl, :broker_fees, :qty, :status, :account_info_id, :user_id)");
+                    $insertStmt = $db->prepare("INSERT INTO orders_info (order_id, order_name, order_type, entry_amount, exit_amount, pnl, broker_fees, qty, status, account_info_id, user_id, strategy_id) 
+                                                VALUES (:order_id, :order_name, :order_type, :entry_amount, :exit_amount, :pnl, :broker_fees, :qty, :status, :account_info_id, :user_id, :strategy_id)");
                     $insertStmt->execute([
                         'order_id' => strval($placedOrderId),
                         'order_name' => $symbol,
@@ -430,7 +430,8 @@ function run_option_selling_strategy(): void {
                         'qty' => $lot,
                         'status' => 'open',
                         'account_info_id' => $account['id'],
-                        'user_id' => $userId
+                        'user_id' => $userId,
+                        'strategy_id' => 2
                     ]);
 
                     log_message("Saved order {$placedOrderId} to database orders_info table.");
@@ -520,3 +521,4 @@ try {
 } catch (Exception $e) {
     log_message("Fatal Error during strategy run: " . $e->getMessage(), "ERROR");
 }
+// C:\xampp\php\php.exe -l options_selling_service.php

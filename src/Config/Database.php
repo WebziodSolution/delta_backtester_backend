@@ -64,6 +64,7 @@ class Database {
                 user_id INT NOT NULL,
                 api_key TEXT NOT NULL,
                 api_secret TEXT NOT NULL,
+                current_margin INT NULL,
                 active TINYINT(1) NOT NULL DEFAULT 1,
                 created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -75,6 +76,24 @@ class Database {
                 lot INT NOT NULL,
                 leverage INT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+            CREATE TABLE IF NOT EXISTS strategys (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                description VARCHAR(255) NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+            CREATE TABLE IF NOT EXISTS subscribe_strategys (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                user_id INT NOT NULL,
+                strategy_id INT NOT NULL,
+                asset VARCHAR(100) NOT NULL,
+                margin_allocation INT NULL,
+                leverage INT NULL,
+                lot_size INT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE RESTRICT,
+                FOREIGN KEY (strategy_id) REFERENCES strategys(id) ON DELETE CASCADE ON UPDATE RESTRICT
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
             CREATE TABLE IF NOT EXISTS orders_info (
@@ -90,10 +109,12 @@ class Database {
                 status VARCHAR(100) NULL,
                 account_info_id INT NULL,
                 user_id INT NULL,
+                strategy_id INT NULL,
                 created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-                FOREIGN KEY (account_info_id) REFERENCES account_info(id) ON DELETE CASCADE
+                FOREIGN KEY (account_info_id) REFERENCES account_info(id) ON DELETE CASCADE,
+                FOREIGN KEY (strategy_id) REFERENCES strategys(id) ON DELETE CASCADE ON UPDATE RESTRICT
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
             CREATE TABLE IF NOT EXISTS password_resets (
@@ -106,5 +127,46 @@ class Database {
         ";
 
         $this->conn->exec($sql);
+
+        // Dynamically migrate existing orders_info table if strategy_id column is missing
+        try {
+            $stmt = $this->conn->query("SHOW COLUMNS FROM orders_info LIKE 'strategy_id'");
+            if (!$stmt->fetch()) {
+                $this->conn->exec("ALTER TABLE orders_info ADD strategy_id INT NULL AFTER user_id");
+                $this->conn->exec("ALTER TABLE orders_info ADD CONSTRAINT fk_orders_info_strategy FOREIGN KEY (strategy_id) REFERENCES strategys(id) ON DELETE CASCADE ON UPDATE RESTRICT");
+            }
+        } catch (PDOException $e) {
+            // Log/ignore errors if table doesn't exist yet (though it should)
+        }
+
+        // Dynamically migrate existing account_info table if current_margin column is missing
+        try {
+            $stmt = $this->conn->query("SHOW COLUMNS FROM account_info LIKE 'current_margin'");
+            if (!$stmt->fetch()) {
+                $this->conn->exec("ALTER TABLE account_info ADD current_margin INT NULL AFTER api_secret");
+            }
+        } catch (PDOException $e) {
+            // Log/ignore errors if table doesn't exist yet (though it should)
+        }
+
+        // Dynamically migrate existing strategys table if columns are present
+        try {
+            $stmt = $this->conn->query("SHOW COLUMNS FROM strategys LIKE 'asset'");
+            if ($stmt->fetch()) {
+                $this->conn->exec("ALTER TABLE strategys DROP asset, DROP margin_allocation, DROP leverage, DROP lot_size");
+            }
+        } catch (PDOException $e) {
+            // Ignore
+        }
+
+        // Dynamically migrate existing subscribe_strategys table if new columns are missing
+        try {
+            $stmt = $this->conn->query("SHOW COLUMNS FROM subscribe_strategys LIKE 'asset'");
+            if (!$stmt->fetch()) {
+                $this->conn->exec("ALTER TABLE subscribe_strategys ADD asset VARCHAR(100) NOT NULL AFTER strategy_id, ADD margin_allocation INT NULL AFTER asset, ADD leverage INT NULL AFTER margin_allocation, ADD lot_size INT NULL AFTER leverage");
+            }
+        } catch (PDOException $e) {
+            // Ignore
+        }
     }
 }

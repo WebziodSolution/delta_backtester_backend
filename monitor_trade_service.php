@@ -293,7 +293,7 @@ function check_and_monitor_trades(): void {
 
     foreach ($activeAccounts as $account) {
         // Query open orders for this account
-        $orderStmt = $db->prepare("SELECT id, order_id, order_name, order_type, entry_amount, exit_amount, pnl, broker_fees, qty, status, account_info_id, user_id, created_at, updated_at FROM orders_info WHERE account_info_id = :account_info_id AND status = 'open'");
+        $orderStmt = $db->prepare("SELECT id, order_id, order_name, order_type, entry_amount, exit_amount, pnl, broker_fees, qty, status, account_info_id, user_id, strategy_id , created_at, updated_at FROM orders_info WHERE account_info_id = :account_info_id AND status = 'open' AND strategy_id = 2");
         $orderStmt->execute(['account_info_id' => $account['id']]);
         $openOrders = $orderStmt->fetchAll();
 

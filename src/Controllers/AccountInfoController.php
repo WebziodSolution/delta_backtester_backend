@@ -55,4 +55,22 @@ class AccountInfoController {
             ApiResponse::send($e->getCode() ?: 404, $e->getMessage());
         }
     }
+
+    public function syncMargin(array $data): void {
+        $userId = isset($data['user_id']) ? intval($data['user_id']) : null;
+        if ($userId === null || $userId <= 0) {
+            ApiResponse::send(400, "A valid positive integer user_id is required");
+            return;
+        }
+
+        try {
+            $totalMargin = AccountInfoService::syncCurrentMargin($userId);
+            ApiResponse::send(200, "Account margin synchronized successfully", [
+                "user_id" => $userId,
+                "current_margin" => $totalMargin
+            ]);
+        } catch (Exception $e) {
+            ApiResponse::send($e->getCode() ?: 400, $e->getMessage());
+        }
+    }
 }

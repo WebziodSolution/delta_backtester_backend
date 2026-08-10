@@ -26,6 +26,8 @@ use App\Controllers\UserController;
 use App\Controllers\AccountInfoController;
 use App\Controllers\TradeConfigController;
 use App\Controllers\OrdersInfoController;
+use App\Controllers\StrategyController;
+use App\Controllers\SubscribeStrategyController;
 
 // 2. Load .env Configurations
 DotEnv::load(__DIR__ . '/.env');
@@ -160,6 +162,9 @@ if (preg_match('/^\/account-info\/(\d+)$/', $apiPath, $matches)) {
         (new AccountInfoController())->delete($id);
     }
 }
+if ($apiPath === '/account-info/sync-margin' && $requestMethod === 'POST') {
+    (new AccountInfoController())->syncMargin($inputData);
+}
 
 // Trade Config CRUD Routes
 if ($apiPath === '/trade-config' && $requestMethod === 'POST') {
@@ -198,6 +203,52 @@ if (preg_match('/^\/orders-info\/(\d+)$/', $apiPath, $matches)) {
     }
     if ($requestMethod === 'DELETE') {
         (new OrdersInfoController())->delete($id);
+    }
+}
+
+// Strategy CRUD Routes
+if ($apiPath === '/strategys' && $requestMethod === 'POST') {
+    (new StrategyController())->create($inputData);
+}
+if ($apiPath === '/strategys' && $requestMethod === 'GET') {
+    (new StrategyController())->list($_GET);
+}
+if (preg_match('/^\/strategys\/(\d+)$/', $apiPath, $matches)) {
+    $id = (int)$matches[1];
+    if ($requestMethod === 'GET') {
+        (new StrategyController())->retrieve($id);
+    }
+    if ($requestMethod === 'PUT') {
+        (new StrategyController())->update($id, $inputData);
+    }
+    if ($requestMethod === 'DELETE') {
+        (new StrategyController())->delete($id);
+    }
+}
+if (preg_match('/^\/strategys\/(\d+)\/performance$/', $apiPath, $matches)) {
+    $id = (int)$matches[1];
+    if ($requestMethod === 'GET') {
+        (new OrdersInfoController())->performance($id);
+    }
+}
+
+// Subscribe Strategy CRUD Routes
+if ($apiPath === '/subscribe-strategys' && $requestMethod === 'POST') {
+    (new SubscribeStrategyController())->create($inputData);
+}
+if ($apiPath === '/subscribe-strategys' && $requestMethod === 'GET') {
+    (new SubscribeStrategyController())->list($_GET);
+}
+if (preg_match('/^\/subscribe-strategys\/(\d+)$/', $apiPath, $matches)) {
+    $id = (int)$matches[1];
+    if ($requestMethod === 'GET') {
+        (new SubscribeStrategyController())->retrieve($id);
+    }
+    if ($requestMethod === 'PUT') {
+        (new SubscribeStrategyController())->update($id, $inputData);
+    }
+    if ($requestMethod === 'DELETE') {
+        (new SubscribeStrategyController())->delete($id);
     }
 }
 
