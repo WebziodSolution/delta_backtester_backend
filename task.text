@@ -1,0 +1,21 @@
+I want to create one php service of my OptionScalpingBacktester.jsx file. give a new name for this new service.
+
+Copy all logic of trade execution , monitoring etc.. but into live market not backtesting.
+
+Read @querys.sql and @delta_backtester.sql for my current tables. also read @options_selling_service.php or @monitor_trade_service.php for refrence how delta exchange works with API's 
+
+Into jsx file margin is come from accountSize = 100 but into our php service it's come from user's delta exchange account.then other details like leverage and allocationPercent is come from DB table subscribe_strategys by user_id and strategy_id = 1 it's fixed. and also it has asset column which has (BTC,ETH) etc.. use this asset for trade
+
+Convert code into php service very carefully. use same logic which is into jsx file. just change api's and logic for live market into php service.
+
+Also give me steps how our new service works and how to set this services accroding to logic and monitor.
+
+Notes:
+1. Always use send_mail service for mail user what happen and use debug also for when i upload service on server then if any error happen then it's log properly
+
+2. Read @monitor_trade_service.php for refrence how to use delta exchange api for placing orders, monitoring orders, closing orders etc..
+
+3. Read @querys.sql and @delta_backtester.sql for my current table structure
+
+4. Use same logic which is into jsx file. just change api's and logic for live market into php service
+

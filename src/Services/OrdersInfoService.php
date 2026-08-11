@@ -286,7 +286,7 @@ class OrdersInfoService {
             }
         }
 
-        if ($capitalBase <= 0) {
+        if ($capitalBase <= 0 && $strategyId !== 2) {
             throw new Exception("Capital base (margin) is not configured for user. Please set margin_allocation on the strategy subscription or synchronize current_margin.", 400);
         }
 
@@ -320,7 +320,7 @@ class OrdersInfoService {
             $pnl = (float)($trade['pnl'] ?? 0.0);
             $totalPnl += $pnl;
 
-            $tradeReturnPct = ($pnl / $capitalBase) * 100;
+            $tradeReturnPct = ($capitalBase > 0) ? (($pnl / $capitalBase) * 100) : 0.0;
 
             if ($pnl > 0) {
                 $winCount++;
