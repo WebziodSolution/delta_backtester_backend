@@ -298,7 +298,7 @@ function run_option_selling_strategy(): void {
         }
 
         // Fetch trade configuration from strategy subscription (strategy_id = 2, margin_allocation is null)
-        $configStmt = $db->prepare("SELECT lot_size as lot, leverage FROM subscribe_strategys WHERE user_id = :user_id AND strategy_id = 2 AND margin_allocation IS NULL");
+        $configStmt = $db->prepare("SELECT lot_size as lot, leverage FROM subscribe_strategys WHERE user_id = :user_id AND strategy_id = 2");
         $configStmt->execute(['user_id' => $userId]);
         $tradeConfig = $configStmt->fetch();
 

@@ -387,6 +387,27 @@ function run_option_scalping_strategy(): void {
 
             if ($signal === null) {
                 log_message("No trade signal detected for user {$username} on asset {$asset}. Trend: {$trend}, Spot: {$currentSpot}, EMA: {$trendEma}, RSI: {$rsiVal}, MACD: {$macdVal}, SignalLine: {$sigVal}");
+                // if ($userEmail) {
+                //     $subject = "No Option Scalping Signal Detected - {$asset}";
+                //     $html = "<p>Dear {$username},</p>"
+                //           . "<p>No trade signal was detected for you on asset <strong>{$asset}</strong>.</p>"
+                //           . "<h3>Technical Indicators:</h3>"
+                //           . "<ul>"
+                //           . "<li><strong>Trend:</strong> {$trend}</li>"
+                //           . "<li><strong>Spot Price:</strong> \${$currentSpot}</li>"
+                //           . "<li><strong>EMA (200):</strong> {$trendEma}</li>"
+                //           . "<li><strong>RSI (14):</strong> {$rsiVal}</li>"
+                //           . "<li><strong>MACD Line:</strong> {$macdVal}</li>"
+                //           . "<li><strong>Signal Line:</strong> {$sigVal}</li>"
+                //           . "</ul>"
+                //           . "<p>Best regards,<br/>Delta Backtester Automation Service</p>";
+                //     try {
+                //         EmailService::send($userEmail, $subject, $html);
+                //         log_message("No-signal email notification sent to {$userEmail}");
+                //     } catch (Exception $mailEx) {
+                //         log_message("Failed to send no-signal email to user {$userEmail}: " . $mailEx->getMessage(), "ERROR");
+                //     }
+                // }
                 continue;
             }
 
