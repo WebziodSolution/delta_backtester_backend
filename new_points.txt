@@ -1,0 +1,6 @@
+1. Apply threding
+2. Change loop not do loop by orders table not accouont on monitor script.
+3. Add one more filed for each strategys total margin in db and also get.
+4. Use fix 1:3 or RR for totalMargin on Account on delta exchange.
+5. Set SL/TP on delta exchange as well.
+6. Set Traling SL

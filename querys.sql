@@ -29,3 +29,8 @@ ALTER TABLE `orders_info`
 
 ALTER TABLE `subscribe_strategys` 
   ADD COLUMN `peak_balance` DOUBLE NULL AFTER `lot_size`;
+
+
+ALTER TABLE `subscribe_strategys` 
+ADD COLUMN `allocated_balance` DOUBLE NULL AFTER `peak_balance`,
+ADD COLUMN `current_balance` DOUBLE NULL AFTER `allocated_balance`;

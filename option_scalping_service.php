@@ -301,7 +301,7 @@ function run_option_scalping_strategy(): void {
             }
 
             // 2. Fetch trade configuration from strategy subscription (strategy_id = 1)
-            $subStmt = $db->prepare("SELECT asset, margin_allocation, leverage, peak_balance FROM subscribe_strategys WHERE user_id = :user_id AND strategy_id = 1");
+            $subStmt = $db->prepare("SELECT asset, margin_allocation, leverage, peak_balance, allocated_balance, current_balance FROM subscribe_strategys WHERE user_id = :user_id AND strategy_id = 1");
             $subStmt->execute(['user_id' => $userId]);
             $subscription = $subStmt->fetch();
 
@@ -319,6 +319,8 @@ function run_option_scalping_strategy(): void {
             $allocationPercent = intval($subscription['margin_allocation'] ?? 50);
             $leverage = intval($subscription['leverage'] ?? 25);
             $peakBalance = $subscription['peak_balance'] !== null ? floatval($subscription['peak_balance']) : null;
+            $allocatedBalance = $subscription['allocated_balance'] !== null ? floatval($subscription['allocated_balance']) : null;
+            $currentBalance = $subscription['current_balance'] !== null ? floatval($subscription['current_balance']) : null;
 
             // 3. One position at a time check (no overlapping trades)
             $openCheckStmt = $db->prepare("SELECT id FROM orders_info WHERE user_id = :user_id AND strategy_id = 1 AND status = 'open'");
@@ -386,28 +388,7 @@ function run_option_scalping_strategy(): void {
             }
 
             if ($signal === null) {
-                log_message("No trade signal detected for user {$username} on asset {$asset}. Trend: {$trend}, Spot: {$currentSpot}, EMA: {$trendEma}, RSI: {$rsiVal}, MACD: {$macdVal}, SignalLine: {$sigVal}");
-                // if ($userEmail) {
-                //     $subject = "No Option Scalping Signal Detected - {$asset}";
-                //     $html = "<p>Dear {$username},</p>"
-                //           . "<p>No trade signal was detected for you on asset <strong>{$asset}</strong>.</p>"
-                //           . "<h3>Technical Indicators:</h3>"
-                //           . "<ul>"
-                //           . "<li><strong>Trend:</strong> {$trend}</li>"
-                //           . "<li><strong>Spot Price:</strong> \${$currentSpot}</li>"
-                //           . "<li><strong>EMA (200):</strong> {$trendEma}</li>"
-                //           . "<li><strong>RSI (14):</strong> {$rsiVal}</li>"
-                //           . "<li><strong>MACD Line:</strong> {$macdVal}</li>"
-                //           . "<li><strong>Signal Line:</strong> {$sigVal}</li>"
-                //           . "</ul>"
-                //           . "<p>Best regards,<br/>Delta Backtester Automation Service</p>";
-                //     try {
-                //         EmailService::send($userEmail, $subject, $html);
-                //         log_message("No-signal email notification sent to {$userEmail}");
-                //     } catch (Exception $mailEx) {
-                //         log_message("Failed to send no-signal email to user {$userEmail}: " . $mailEx->getMessage(), "ERROR");
-                //     }
-                // }
+                log_message("No trade signal detected for user {$username} on asset {$asset}. Trend: {$trend}, Spot: {$currentSpot}, EMA: {$trendEma}, RSI: {$rsiVal}, MACD: {$macdVal}, SignalLine: {$sigVal}");                
                 continue;
             }
 
@@ -462,18 +443,52 @@ function run_option_scalping_strategy(): void {
             }
 
             $balances = $balancesResp['result'] ?? [];
-            $usdAvailable = 0.0;
+            $exchangeUsdAvailable = 0.0;
             foreach ($balances as $bal) {
                 if (intval($bal['asset_id'] ?? 0) === 14) { // USD/USDT
-                    $usdAvailable = floatval($bal['available_balance'] ?? 0.0);
+                    $exchangeUsdAvailable = floatval($bal['available_balance'] ?? 0.0);
                     break;
                 }
             }
 
-            log_message("Available Wallet Balance: \${$usdAvailable} USDT");
+            log_message("Actual Exchange Available Wallet Balance: \${$exchangeUsdAvailable} USDT");
+
+            if ($exchangeUsdAvailable <= 0.0) {
+                log_message("Account ID {$account['id']} has zero or negative available exchange balance. Skipping.", "WARNING");
+                continue;
+            }
+
+            // Determine USD available for this strategy
+            if ($allocatedBalance !== null && $allocatedBalance > 0.0) {
+                // Initialize current balance if it hasn't been set
+                if ($currentBalance === null) {
+                    $currentBalance = $allocatedBalance;
+                    $db->prepare("UPDATE subscribe_strategys SET current_balance = :current WHERE user_id = :uid AND strategy_id = 1")
+                       ->execute(['current' => $currentBalance, 'uid' => $userId]);
+                    log_message("Initialized virtual running balance to {$currentBalance} for user {$userId}");
+                }
+
+                // Cap the virtual balance by the actual exchange balance to prevent margin errors
+                $usdAvailable = min($currentBalance, $exchangeUsdAvailable);
+                log_message("Using Virtual Balance: \${$currentBalance} USDT (Capped by exchange balance: \${$usdAvailable} USDT)");
+            } else {
+                // Fallback to total exchange balance if no virtual balance is set
+                $usdAvailable = $exchangeUsdAvailable;
+                log_message("No virtual balance set. Using full Exchange Balance: \${$usdAvailable} USDT");
+            }
 
             if ($usdAvailable <= 0.0) {
-                log_message("Account ID {$account['id']} has zero or negative available balance. Skipping.", "WARNING");
+                log_message("Calculated USD available for trade is zero or negative. Skipping.", "WARNING");
+                if ($userEmail) {
+                    $subject = "Account Balance Insufficient - Option Scalping Strategy";
+                    $html = "<p>Dear {$username},</p>"
+                          . "<p>The Option Scalping strategy could not execute because your strategy balance is \$" . number_format($usdAvailable, 2) . " USDT.</p>"
+                          . "<p>Please deposit more funds or allocate more margin to the strategy.</p>"
+                          . "<p>Best regards,<br/>Delta Backtester Automation Service</p>";
+                    try {
+                        EmailService::send($userEmail, $subject, $html);
+                    } catch (Exception $mailEx) {}
+                }
                 continue;
             }
 
@@ -525,6 +540,18 @@ function run_option_scalping_strategy(): void {
                 $scaledQtyLots = floor(($actualQty * $reductionRatio) * $lotMult);
                 if ($scaledQtyLots < 1) {
                     log_message("Insufficient margin even for minimum contract size (1 lot). Skipping trade.", "WARNING");
+                    if ($userEmail) {
+                        $subject = "Account Balance Insufficient - Option Scalping Strategy";
+                        $html = "<p>Dear {$username},</p>"
+                              . "<p>The Option Scalping strategy (strategy_id = 1) could not execute because your balance is insufficient to cover the required margin for the minimum contract size (1 lot).</p>"
+                              . "<p><strong>Available Balance:</strong> \$" . number_format($usdAvailable, 2) . " USDT</p>"
+                              . "<p><strong>Required Margin (for 1 lot):</strong> \$" . number_format($requiredMargin, 2) . " USDT</p>"
+                              . "<p>Please deposit more funds or allocate more margin to the strategy.</p>"
+                              . "<p>Best regards,<br/>Delta Backtester Automation Service</p>";
+                        try {
+                            EmailService::send($userEmail, $subject, $html);
+                        } catch (Exception $mailEx) {}
+                    }
                     continue;
                 }
                 $qtyLots = $scaledQtyLots;

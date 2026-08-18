@@ -297,8 +297,8 @@ function run_option_selling_strategy(): void {
             continue;
         }
 
-        // Fetch trade configuration from strategy subscription (strategy_id = 2, margin_allocation is null)
-        $configStmt = $db->prepare("SELECT lot_size as lot, leverage FROM subscribe_strategys WHERE user_id = :user_id AND strategy_id = 2");
+        // Fetch trade configuration from strategy subscription (strategy_id = 2)
+        $configStmt = $db->prepare("SELECT lot_size as lot, leverage, peak_balance, allocated_balance, current_balance FROM subscribe_strategys WHERE user_id = :user_id AND strategy_id = 2");
         $configStmt->execute(['user_id' => $userId]);
         $tradeConfig = $configStmt->fetch();
 
@@ -318,6 +318,9 @@ function run_option_selling_strategy(): void {
 
         $lot = intval($tradeConfig['lot']);
         $leverage = intval($tradeConfig['leverage']);
+        $peakBalance = $tradeConfig['peak_balance'] !== null ? floatval($tradeConfig['peak_balance']) : null;
+        $allocatedBalance = $tradeConfig['allocated_balance'] !== null ? floatval($tradeConfig['allocated_balance']) : null;
+        $currentBalance = $tradeConfig['current_balance'] !== null ? floatval($tradeConfig['current_balance']) : null;
 
         // Check available account balance using DeltaClient
         $deltaClient = new DeltaClient($account['api_key'], $account['api_secret']);
@@ -338,15 +341,77 @@ function run_option_selling_strategy(): void {
         }
 
         $balances = $balancesResp['result'] ?? [];
-        $usdAvailable = 0.0;
+        $exchangeUsdAvailable = 0.0;
         foreach ($balances as $bal) {
             if (intval($bal['asset_id'] ?? 0) === 14) { // Asset ID 14 is USD/USDT
-                $usdAvailable = floatval($bal['available_balance'] ?? 0.0);
+                $exchangeUsdAvailable = floatval($bal['available_balance'] ?? 0.0);
                 break;
             }
         }
 
-        log_message("Account ID {$account['id']} (User: {$user['username']}) - Available USD: {$usdAvailable}");
+        log_message("Account ID {$account['id']} (User: {$user['username']}) - Actual Exchange Available USD: {$exchangeUsdAvailable}");
+
+        if ($exchangeUsdAvailable <= 0.0) {
+            log_message("Account ID {$account['id']} has zero or negative exchange balance. Skipping.", "WARNING");
+            if ($userEmail) {
+                $subject = "Account Balance Insufficient - Option Selling Strategy";
+                $html = "<p>Dear {$user['username']},</p>"
+                      . "<p>The option selling strategy could not execute because your Delta Exchange available balance is \$" . number_format($exchangeUsdAvailable, 2) . " USDT.</p>"
+                      . "<p>Please deposit more funds to your exchange account.</p>"
+                      . "<p>Best regards,<br/>Delta Backtester Automation Service</p>";
+                try {
+                    EmailService::send($userEmail, $subject, $html);
+                } catch (Exception $mailEx) {}
+            }
+            continue;
+        }
+
+        // Determine USD available for this strategy
+        if ($allocatedBalance !== null && $allocatedBalance > 0.0) {
+            // Initialize current balance if it hasn't been set
+            if ($currentBalance === null) {
+                $currentBalance = $allocatedBalance;
+                $db->prepare("UPDATE subscribe_strategys SET current_balance = :current WHERE user_id = :uid AND strategy_id = 2")
+                   ->execute(['current' => $currentBalance, 'uid' => $userId]);
+                log_message("Initialized virtual running balance to {$currentBalance} for user {$userId}");
+            }
+
+            // Cap the virtual balance by the actual exchange balance to prevent margin errors
+            $usdAvailable = min($currentBalance, $exchangeUsdAvailable);
+            log_message("Using Virtual Balance: \${$currentBalance} USDT (Capped by exchange balance: \${$usdAvailable} USDT)");
+        } else {
+            // Fallback to total exchange balance if no virtual balance is set
+            $usdAvailable = $exchangeUsdAvailable;
+            log_message("No virtual balance set. Using full Exchange Balance: \${$usdAvailable} USDT");
+        }
+
+        if ($usdAvailable <= 0.0) {
+            log_message("Calculated USD available for trade is zero or negative. Skipping.", "WARNING");
+            if ($userEmail) {
+                $subject = "Account Balance Insufficient - Option Selling Strategy";
+                $html = "<p>Dear {$user['username']},</p>"
+                      . "<p>The option selling strategy (strategy_id = 2) could not execute because your strategy balance is \$" . number_format($usdAvailable, 2) . " USDT.</p>"
+                      . "<p>Please deposit more funds or allocate more margin to the strategy.</p>"
+                      . "<p>Best regards,<br/>Delta Backtester Automation Service</p>";
+                try {
+                    EmailService::send($userEmail, $subject, $html);
+                } catch (Exception $mailEx) {}
+            }
+            continue;
+        }
+
+        // Update peak balance in DB for strategy_id = 2
+        if ($peakBalance === null || $peakBalance <= 0.0) {
+            $peakBalance = $usdAvailable;
+            $db->prepare("UPDATE subscribe_strategys SET peak_balance = :peak WHERE user_id = :uid AND strategy_id = 2")
+               ->execute(['peak' => $peakBalance, 'uid' => $userId]);
+            log_message("Initialized peak balance to {$peakBalance} for user {$userId}");
+        } elseif ($usdAvailable > $peakBalance) {
+            $peakBalance = $usdAvailable;
+            $db->prepare("UPDATE subscribe_strategys SET peak_balance = :peak WHERE user_id = :uid AND strategy_id = 2")
+               ->execute(['peak' => $peakBalance, 'uid' => $userId]);
+            log_message("Updated peak balance to new high {$peakBalance} for user {$userId}");
+        }
 
         // Required Margin Calculation: (BTC Price * BTC Quantity * 2) / Leverage
         // 1 lot = 0.001 BTC

@@ -220,7 +220,21 @@ function close_scalping_trade(PDO $db, array $account, array $order, string $exi
                 'id' => $order['id']
             ]);
 
-            log_message("Database successfully updated. Scalping Order ID {$orderId} is marked CLOSED. PnL: \${$pnlVal} USDT");
+            // 3.5. Update virtual balance if user has allocated_balance configured
+            $netTradePnl = $pnlVal - $brokerFeesVal;
+            $balanceUpdateStmt = $db->prepare("
+                UPDATE subscribe_strategys 
+                SET 
+                    current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl,
+                    peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl)
+                WHERE user_id = :uid AND strategy_id = 1 AND allocated_balance IS NOT NULL
+            ");
+            $balanceUpdateStmt->execute([
+                'net_pnl' => $netTradePnl,
+                'uid' => $userId
+            ]);
+
+            log_message("Database successfully updated. Scalping Order ID {$orderId} is marked CLOSED. PnL: \${$pnlVal} USDT, Net PnL: \${$netTradePnl} USDT");
 
             // 4. Send success email
             if ($userEmail) {
@@ -275,19 +289,48 @@ function close_scalping_trade(PDO $db, array $account, array $order, string $exi
 function check_and_monitor_scalping_trades(): void {
     $db = Database::getInstance()->getConnection();
     
-    // Fetch active accounts
-    $stmt = $db->query("SELECT id, user_id, api_key, api_secret, active FROM account_info WHERE active = 1");
-    $activeAccounts = $stmt->fetchAll();
+    // Fetch all open Option Scalping orders for active accounts in a single JOIN query
+    $stmt = $db->prepare("
+        SELECT 
+            o.id, 
+            o.order_id, 
+            o.order_name, 
+            o.order_type, 
+            o.entry_amount, 
+            o.exit_amount, 
+            o.pnl, 
+            o.broker_fees, 
+            o.qty, 
+            o.status, 
+            o.account_info_id, 
+            o.user_id, 
+            o.strategy_id, 
+            o.created_at, 
+            o.updated_at, 
+            o.tp_price, 
+            o.sl_price, 
+            o.trade_action,
+            a.api_key,
+            a.api_secret,
+            a.active AS account_active
+        FROM orders_info o
+        JOIN account_info a ON o.account_info_id = a.id
+        WHERE o.status = 'open' 
+          AND o.strategy_id = 1 
+          AND a.active = 1
+    ");
+    $stmt->execute();
+    $openOrders = $stmt->fetchAll();
 
-    if (empty($activeAccounts)) {
-        log_message("No active accounts found in database.");
+    if (empty($openOrders)) {
+        log_message("No open Option Scalping orders found for active accounts.");
         return;
     }
 
-    log_message("Starting Option Scalping trade monitoring sweep across " . count($activeAccounts) . " accounts...");
+    log_message("Starting Option Scalping trade monitoring sweep for " . count($openOrders) . " open orders...");
 
-    foreach ($activeAccounts as $account) {
-        $userId = intval($account['user_id']);
+    foreach ($openOrders as $order) {
+        $userId = intval($order['user_id']);
         $userEmail = null;
         $username = 'Trader';
         try {
@@ -295,77 +338,73 @@ function check_and_monitor_scalping_trades(): void {
             $userEmail = $user['email'];
             $username = $user['username'];
         } catch (Exception $e) {
-            log_message("Account ID {$account['id']} has no valid user. Skipping.", "WARNING");
+            log_message("Order ID {$order['id']} (User ID {$userId}) has no valid user. Skipping.", "WARNING");
             continue;
         }
 
-        try {
-            // Query open Option Scalping orders (strategy_id = 1) for this account
-            $orderStmt = $db->prepare("SELECT id, order_id, order_name, order_type, entry_amount, exit_amount, pnl, broker_fees, qty, status, account_info_id, user_id, strategy_id, created_at, updated_at, tp_price, sl_price, trade_action FROM orders_info WHERE account_info_id = :account_info_id AND status = 'open' AND strategy_id = 1");
-            $orderStmt->execute(['account_info_id' => $account['id']]);
-            $openOrders = $orderStmt->fetchAll();
+        // Reconstruct the account array structure needed by downstream functions like close_scalping_trade
+        $account = [
+            'id' => $order['account_info_id'],
+            'user_id' => $userId,
+            'api_key' => $order['api_key'],
+            'api_secret' => $order['api_secret'],
+            'active' => intval($order['account_active'])
+        ];
 
-            if (empty($openOrders)) {
+        try {
+            $orderName = $order['order_name'];
+            $orderId = $order['order_id'];
+            $tpPrice = floatval($order['tp_price']);
+            $slPrice = floatval($order['sl_price']);
+            $tradeAction = $order['trade_action'];
+            $createdAtUnix = strtotime($order['created_at']);
+            $ageSeconds = time() - $createdAtUnix;
+
+            log_message("Monitoring {$orderName} (ID: {$orderId}, Action: {$tradeAction}, Age: {$ageSeconds}s, TP: \${$tpPrice}, SL: \${$slPrice})");
+
+            // 1. Check Age Timeout Limit (24 hours = 86400 seconds)
+            if ($ageSeconds >= 86400) {
+                log_message("Option Scalping order {$orderId} has reached the 24-hour timeout limit (age: {$ageSeconds}s). Closing trade.");
+                close_scalping_trade($db, $account, $order, "TIMEOUT / EXPIRY");
                 continue;
             }
 
-            log_message("Found " . count($openOrders) . " open Option Scalping orders for account {$account['id']}");
+            // 2. Fetch the current price of the option contract
+            $ticker = fetch_ticker_for_symbol($orderName);
+            if (!$ticker) {
+                log_message("Could not retrieve ticker details for {$orderName}. Skipping checks for this trade.", "WARNING");
+                continue;
+            }
 
-            foreach ($openOrders as $order) {
-                $orderName = $order['order_name'];
-                $orderId = $order['order_id'];
-                $tpPrice = floatval($order['tp_price']);
-                $slPrice = floatval($order['sl_price']);
-                $tradeAction = $order['trade_action'];
-                $createdAtUnix = strtotime($order['created_at']);
-                $ageSeconds = time() - $createdAtUnix;
+            $currentOptionPrice = floatval($ticker['mark_price'] ?? $ticker['close'] ?? $ticker['spot_price'] ?? 0.0);
 
-                log_message("Monitoring {$orderName} (ID: {$orderId}, Action: {$tradeAction}, Age: {$ageSeconds}s, TP: \${$tpPrice}, SL: \${$slPrice})");
+            if ($currentOptionPrice <= 0.0) {
+                log_message("Ticker for {$orderName} returned invalid or zero price: {$currentOptionPrice}. Skipping checks.", "WARNING");
+                continue;
+            }
 
-                // 1. Check Age Timeout Limit (24 hours = 86400 seconds)
-                if ($ageSeconds >= 86400) {
-                    log_message("Option Scalping order {$orderId} has reached the 24-hour timeout limit (age: {$ageSeconds}s). Closing trade.");
-                    close_scalping_trade($db, $account, $order, "TIMEOUT / EXPIRY");
-                    continue;
+            log_message("{$orderName} current market option price: \${$currentOptionPrice}");
+
+            // 3. Check Take Profit and Stop Loss triggers
+            if ($tradeAction === 'BUY') {
+                if ($currentOptionPrice >= $tpPrice) {
+                    log_message("Take Profit hit for BUY position! ({$currentOptionPrice} >= {$tpPrice}). Closing trade.");
+                    close_scalping_trade($db, $account, $order, "TP HIT");
+                } elseif ($currentOptionPrice <= $slPrice) {
+                    log_message("Stop Loss hit for BUY position! ({$currentOptionPrice} <= {$slPrice}). Closing trade.");
+                    close_scalping_trade($db, $account, $order, "SL HIT");
                 }
-
-                // 2. Fetch the current price of the option contract
-                $ticker = fetch_ticker_for_symbol($orderName);
-                if (!$ticker) {
-                    log_message("Could not retrieve ticker details for {$orderName}. Skipping checks for this trade.", "WARNING");
-                    continue;
-                }
-
-                $currentOptionPrice = floatval($ticker['mark_price'] ?? $ticker['close'] ?? $ticker['spot_price'] ?? 0.0);
-
-                if ($currentOptionPrice <= 0.0) {
-                    log_message("Ticker for {$orderName} returned invalid or zero price: {$currentOptionPrice}. Skipping checks.", "WARNING");
-                    continue;
-                }
-
-                log_message("{$orderName} current market option price: \${$currentOptionPrice}");
-
-                // 3. Check Take Profit and Stop Loss triggers
-                if ($tradeAction === 'BUY') {
-                    if ($currentOptionPrice >= $tpPrice) {
-                        log_message("Take Profit hit for BUY position! ({$currentOptionPrice} >= {$tpPrice}). Closing trade.");
-                        close_scalping_trade($db, $account, $order, "TP HIT");
-                    } elseif ($currentOptionPrice <= $slPrice) {
-                        log_message("Stop Loss hit for BUY position! ({$currentOptionPrice} <= {$slPrice}). Closing trade.");
-                        close_scalping_trade($db, $account, $order, "SL HIT");
-                    }
-                } elseif ($tradeAction === 'SELL') {
-                    if ($currentOptionPrice <= $tpPrice) {
-                        log_message("Take Profit hit for SELL position! ({$currentOptionPrice} <= {$tpPrice}). Closing trade.");
-                        close_scalping_trade($db, $account, $order, "TP HIT");
-                    } elseif ($currentOptionPrice >= $slPrice) {
-                        log_message("Stop Loss hit for SELL position! ({$currentOptionPrice} >= {$slPrice}). Closing trade.");
-                        close_scalping_trade($db, $account, $order, "SL HIT");
-                    }
+            } elseif ($tradeAction === 'SELL') {
+                if ($currentOptionPrice <= $tpPrice) {
+                    log_message("Take Profit hit for SELL position! ({$currentOptionPrice} <= {$tpPrice}). Closing trade.");
+                    close_scalping_trade($db, $account, $order, "TP HIT");
+                } elseif ($currentOptionPrice >= $slPrice) {
+                    log_message("Stop Loss hit for SELL position! ({$currentOptionPrice} >= {$slPrice}). Closing trade.");
+                    close_scalping_trade($db, $account, $order, "SL HIT");
                 }
             }
-        } catch (Exception $accountEx) {
-            $errStr = "Error monitoring account ID {$account['id']} (User: {$username}): " . $accountEx->getMessage() . "\nStack trace:\n" . $accountEx->getTraceAsString();
+        } catch (Exception $orderEx) {
+            $errStr = "Error monitoring order ID {$order['id']} (User: {$username}): " . $orderEx->getMessage() . "\nStack trace:\n" . $orderEx->getTraceAsString();
             log_message($errStr, "ERROR");
             email_error($errStr, $userEmail);
         }

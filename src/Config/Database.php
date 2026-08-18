@@ -93,6 +93,8 @@ class Database {
                 leverage INT NULL,
                 lot_size INT NULL,
                 peak_balance DOUBLE NULL,
+                allocated_balance DOUBLE NULL,
+                current_balance DOUBLE NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE RESTRICT,
                 FOREIGN KEY (strategy_id) REFERENCES strategys(id) ON DELETE CASCADE ON UPDATE RESTRICT
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

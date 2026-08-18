@@ -217,7 +217,21 @@ function close_trade(PDO $db, array $account, array $order, bool $isProfit): voi
                 'id' => $order['id']
             ]);
 
-            log_message("Database successfully updated. Order ID {$orderId} is marked CLOSED.");
+            // 3.5. Update virtual balance if user has allocated_balance configured (strategy_id = 2)
+            $netTradePnl = $pnlVal - $brokerFeesVal;
+            $balanceUpdateStmt = $db->prepare("
+                UPDATE subscribe_strategys 
+                SET 
+                    current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl,
+                    peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl)
+                WHERE user_id = :uid AND strategy_id = 2 AND allocated_balance IS NOT NULL
+            ");
+            $balanceUpdateStmt->execute([
+                'net_pnl' => $netTradePnl,
+                'uid' => $userId
+            ]);
+
+            log_message("Database successfully updated. Order ID {$orderId} is marked CLOSED. PnL: \${$pnlVal} USDT, Net PnL: \${$netTradePnl} USDT");
 
             // 4. Send success email
             if ($userEmail) {
@@ -271,12 +285,38 @@ function close_trade(PDO $db, array $account, array $order, bool $isProfit): voi
 function check_and_monitor_trades(): void {
     $db = Database::getInstance()->getConnection();
     
-    // Fetch active accounts
-    $stmt = $db->query("SELECT id, user_id, api_key, api_secret, active FROM account_info WHERE active = 1");
-    $activeAccounts = $stmt->fetchAll();
+    // Fetch all open Option Selling orders for active accounts in a single JOIN query
+    $stmt = $db->prepare("
+        SELECT 
+            o.id, 
+            o.order_id, 
+            o.order_name, 
+            o.order_type, 
+            o.entry_amount, 
+            o.exit_amount, 
+            o.pnl, 
+            o.broker_fees, 
+            o.qty, 
+            o.status, 
+            o.account_info_id, 
+            o.user_id, 
+            o.strategy_id, 
+            o.created_at, 
+            o.updated_at,
+            a.api_key,
+            a.api_secret,
+            a.active AS account_active
+        FROM orders_info o
+        JOIN account_info a ON o.account_info_id = a.id
+        WHERE o.status = 'open' 
+          AND o.strategy_id = 2 
+          AND a.active = 1
+    ");
+    $stmt->execute();
+    $openOrders = $stmt->fetchAll();
 
-    if (empty($activeAccounts)) {
-        log_message("No active accounts found in database.");
+    if (empty($openOrders)) {
+        log_message("No open Option Selling orders found for active accounts.");
         return;
     }
 
@@ -289,29 +329,34 @@ function check_and_monitor_trades(): void {
         return;
     }
 
-    log_message("Checking " . count($activeAccounts) . " active accounts. Current BTC Price: {$currentBtcPrice}");
+    log_message("Starting Option Selling trade monitoring sweep for " . count($openOrders) . " open orders...");
 
-    foreach ($activeAccounts as $account) {
-        // Query open orders for this account
-        $orderStmt = $db->prepare("SELECT id, order_id, order_name, order_type, entry_amount, exit_amount, pnl, broker_fees, qty, status, account_info_id, user_id, strategy_id , created_at, updated_at FROM orders_info WHERE account_info_id = :account_info_id AND status = 'open' AND strategy_id = 2");
-        $orderStmt->execute(['account_info_id' => $account['id']]);
-        $openOrders = $orderStmt->fetchAll();
+    // Group open orders by account first, so we can monitor per account
+    $ordersByAccount = [];
+    foreach ($openOrders as $order) {
+        $ordersByAccount[$order['account_info_id']][] = $order;
+    }
 
-        if (empty($openOrders)) {
-            continue;
-        }
+    foreach ($ordersByAccount as $accountId => $accountOrders) {
+        // Since all orders in this group share the same account info, we can extract it from the first order
+        $firstOrder = $accountOrders[0];
+        $account = [
+            'id' => $accountId,
+            'user_id' => $firstOrder['user_id'],
+            'api_key' => $firstOrder['api_key'],
+            'api_secret' => $firstOrder['api_secret'],
+            'active' => intval($firstOrder['account_active'])
+        ];
 
-        log_message("Found " . count($openOrders) . " open orders for account {$account['id']}");
-
-        // Group open orders by expiry date suffix (e.g. C-BTC-61800-290726 -> suffix is 290726)
+        // Group this account's open orders by expiry date suffix (e.g. C-BTC-61800-290726 -> suffix is 290726)
         $ordersByExpiry = [];
-        foreach ($openOrders as $order) {
+        foreach ($accountOrders as $order) {
             $parts = explode('-', $order['order_name']);
             $expiry = isset($parts[3]) ? $parts[3] : 'unknown';
             $ordersByExpiry[$expiry][] = $order;
         }
 
-        // Process each expiry group
+        // Process each expiry group for this account
         foreach ($ordersByExpiry as $expiry => $groupOrders) {
             $callStrike = null;
             $putStrike = null;
@@ -333,7 +378,7 @@ function check_and_monitor_trades(): void {
 
             // Check if current price is within safe strangle bounds
             if ($currentBtcPrice >= $lowerBound && $currentBtcPrice <= $upperBound) {
-                log_message("Account ID {$account['id']}: BTC price {$currentBtcPrice} is IN RANGE ({$lowerBound} - {$upperBound}) for expiry suffix {$expiry}.");
+                log_message("Account ID {$accountId}: BTC price {$currentBtcPrice} is IN RANGE ({$lowerBound} - {$upperBound}) for expiry suffix {$expiry}.");
 
                 // Check gap >= 12h 00m
                 foreach ($groupOrders as $order) {
@@ -349,7 +394,7 @@ function check_and_monitor_trades(): void {
                     }
                 }
             } else {
-                log_message("Account ID {$account['id']}: BTC price {$currentBtcPrice} is OUT OF RANGE ({$lowerBound} - {$upperBound}) for expiry suffix {$expiry}. Booking loss for all orders in group!", "WARNING");
+                log_message("Account ID {$accountId}: BTC price {$currentBtcPrice} is OUT OF RANGE ({$lowerBound} - {$upperBound}) for expiry suffix {$expiry}. Booking loss for all orders in group!", "WARNING");
                 foreach ($groupOrders as $order) {
                     close_trade($db, $account, $order, false);
                 }

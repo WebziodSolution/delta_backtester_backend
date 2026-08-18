@@ -14,7 +14,7 @@ class SubscribeStrategyService {
 
     public static function getById(int $id): array {
         $db = self::getDb();
-        $stmt = $db->prepare("SELECT id, user_id, strategy_id, asset, margin_allocation, leverage, lot_size FROM subscribe_strategys WHERE id = :id");
+        $stmt = $db->prepare("SELECT id, user_id, strategy_id, asset, margin_allocation, leverage, lot_size, peak_balance, allocated_balance, current_balance FROM subscribe_strategys WHERE id = :id");
         $stmt->execute(['id' => $id]);
         $subscription = $stmt->fetch();
         
@@ -29,13 +29,16 @@ class SubscribeStrategyService {
         $subscription['margin_allocation'] = $subscription['margin_allocation'] !== null ? (int)$subscription['margin_allocation'] : null;
         $subscription['leverage'] = $subscription['leverage'] !== null ? (int)$subscription['leverage'] : null;
         $subscription['lot_size'] = $subscription['lot_size'] !== null ? (int)$subscription['lot_size'] : null;
+        $subscription['peak_balance'] = $subscription['peak_balance'] !== null ? (float)$subscription['peak_balance'] : null;
+        $subscription['allocated_balance'] = $subscription['allocated_balance'] !== null ? (float)$subscription['allocated_balance'] : null;
+        $subscription['current_balance'] = $subscription['current_balance'] !== null ? (float)$subscription['current_balance'] : null;
 
         return $subscription;
     }
 
     public static function getAll(?int $userId = null, ?int $strategyId = null, int $skip = 0, int $limit = 100): array {
         $db = self::getDb();
-        $sql = "SELECT id, user_id, strategy_id, asset, margin_allocation, leverage, lot_size FROM subscribe_strategys";
+        $sql = "SELECT id, user_id, strategy_id, asset, margin_allocation, leverage, lot_size, peak_balance, allocated_balance, current_balance FROM subscribe_strategys";
         $where = [];
         $params = [];
 
@@ -71,6 +74,9 @@ class SubscribeStrategyService {
             $row['margin_allocation'] = $row['margin_allocation'] !== null ? (int)$row['margin_allocation'] : null;
             $row['leverage'] = $row['leverage'] !== null ? (int)$row['leverage'] : null;
             $row['lot_size'] = $row['lot_size'] !== null ? (int)$row['lot_size'] : null;
+            $row['peak_balance'] = $row['peak_balance'] !== null ? (float)$row['peak_balance'] : null;
+            $row['allocated_balance'] = $row['allocated_balance'] !== null ? (float)$row['allocated_balance'] : null;
+            $row['current_balance'] = $row['current_balance'] !== null ? (float)$row['current_balance'] : null;
         }
         return $results;
     }
@@ -101,6 +107,14 @@ class SubscribeStrategyService {
             $lotSize = ValidationHelper::validatePositiveInt($data['lot_size'], 'lot_size');
         }
 
+        $allocatedBalance = null;
+        if (isset($data['allocated_balance']) && $data['allocated_balance'] !== null && $data['allocated_balance'] !== '') {
+            if (!is_numeric($data['allocated_balance']) || floatval($data['allocated_balance']) < 0.0) {
+                throw new Exception("allocated_balance must be a positive number", 400);
+            }
+            $allocatedBalance = floatval($data['allocated_balance']);
+        }
+
         // Verify user exists
         try {
             UserService::getById($userId);
@@ -122,14 +136,16 @@ class SubscribeStrategyService {
             throw new Exception("User is already subscribed to this strategy", 400);
         }
 
-        $stmt = $db->prepare("INSERT INTO subscribe_strategys (user_id, strategy_id, asset, margin_allocation, leverage, lot_size) VALUES (:user_id, :strategy_id, :asset, :margin_allocation, :leverage, :lot_size)");
+        $stmt = $db->prepare("INSERT INTO subscribe_strategys (user_id, strategy_id, asset, margin_allocation, leverage, lot_size, allocated_balance, current_balance) VALUES (:user_id, :strategy_id, :asset, :margin_allocation, :leverage, :lot_size, :allocated_balance, :current_balance)");
         $stmt->execute([
             'user_id' => $userId,
             'strategy_id' => $strategyId,
             'asset' => $asset,
             'margin_allocation' => $marginAllocation,
             'leverage' => $leverage,
-            'lot_size' => $lotSize
+            'lot_size' => $lotSize,
+            'allocated_balance' => $allocatedBalance,
+            'current_balance' => $allocatedBalance
         ]);
 
         $newId = (int)$db->lastInsertId();
@@ -201,6 +217,34 @@ class SubscribeStrategyService {
             }
             $updateFields[] = "lot_size = :lot_size";
             $params['lot_size'] = $lotSize;
+        }
+
+        if (array_key_exists('allocated_balance', $data)) {
+            $allocatedBalance = null;
+            if ($data['allocated_balance'] !== null && $data['allocated_balance'] !== '') {
+                if (!is_numeric($data['allocated_balance']) || floatval($data['allocated_balance']) < 0.0) {
+                    throw new Exception("allocated_balance must be a positive number", 400);
+                }
+                $allocatedBalance = floatval($data['allocated_balance']);
+            }
+            $updateFields[] = "allocated_balance = :allocated_balance";
+            $params['allocated_balance'] = $allocatedBalance;
+
+            // Update current_balance to match the new allocated balance
+            $updateFields[] = "current_balance = :current_balance";
+            $params['current_balance'] = $allocatedBalance;
+        }
+
+        if (array_key_exists('current_balance', $data)) {
+            $currentBalance = null;
+            if ($data['current_balance'] !== null && $data['current_balance'] !== '') {
+                if (!is_numeric($data['current_balance']) || floatval($data['current_balance']) < 0.0) {
+                    throw new Exception("current_balance must be a positive number", 400);
+                }
+                $currentBalance = floatval($data['current_balance']);
+            }
+            $updateFields[] = "current_balance = :current_balance";
+            $params['current_balance'] = $currentBalance;
         }
 
         if (empty($updateFields)) {
