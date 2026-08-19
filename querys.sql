@@ -34,3 +34,7 @@ ALTER TABLE `subscribe_strategys`
 ALTER TABLE `subscribe_strategys` 
 ADD COLUMN `allocated_balance` DOUBLE NULL AFTER `peak_balance`,
 ADD COLUMN `current_balance` DOUBLE NULL AFTER `allocated_balance`;
+
+ALTER TABLE orders_info 
+  ADD COLUMN tp_order_id VARCHAR(255) NULL AFTER trade_action,
+  ADD COLUMN sl_order_id VARCHAR(255) NULL AFTER tp_order_id;

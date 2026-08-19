@@ -111,6 +111,8 @@ class Database {
                 tp_price DOUBLE NULL,
                 sl_price DOUBLE NULL,
                 trade_action VARCHAR(20) NULL,
+                tp_order_id VARCHAR(255) NULL,
+                sl_order_id VARCHAR(255) NULL,
                 qty INT NULL,
                 status VARCHAR(100) NULL,
                 account_info_id INT NULL,

@@ -21,7 +21,7 @@ class DeltaClient {
         $timestamp = (string)(time() + $this->timeOffsetSec);
         
         $payload = "";
-        if ($body !== null && in_array(strtoupper($method), ["POST", "PUT"])) {
+        if ($body !== null && in_array(strtoupper($method), ["POST", "PUT", "DELETE"])) {
             $payload = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         }
 
@@ -42,7 +42,7 @@ class DeltaClient {
             'Accept: application/json'
         ];
 
-        if ($body !== null && in_array(strtoupper($method), ["POST", "PUT"])) {
+        if ($body !== null && in_array(strtoupper($method), ["POST", "PUT", "DELETE"])) {
             $headers[] = 'Content-Type: application/json';
             curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
         }
@@ -82,7 +82,7 @@ class DeltaClient {
         return $this->request("/v2/orders/" . $orderId);
     }
 
-    public function placeOrder($productId, int $size, string $side = "sell", string $orderType = "market_order", bool $reduceOnly = false): array {
+    public function placeOrder($productId, int $size, string $side = "sell", string $orderType = "market_order", bool $reduceOnly = false, array $extraParams = []): array {
         $path = "/v2/orders";
         $body = [
             "product_id" => intval($productId),
@@ -93,7 +93,19 @@ class DeltaClient {
         if ($reduceOnly) {
             $body["reduce_only"] = true;
         }
+        if (!empty($extraParams)) {
+            $body = array_merge($body, $extraParams);
+        }
         return $this->request($path, "POST", $body);
+    }
+
+    public function cancelOrder($productId, $orderId): array {
+        $path = "/v2/orders";
+        $body = [
+            "product_id" => intval($productId),
+            "id" => strval($orderId)
+        ];
+        return $this->request($path, "DELETE", $body);
     }
 
     public function getFills(): array {
