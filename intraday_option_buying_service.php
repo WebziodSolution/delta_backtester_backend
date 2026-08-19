@@ -597,7 +597,7 @@ function run_intraday_option_buying_strategy(): void {
 
                 // B. Stop Loss Stop Limit Order
                 $slParams = [
-                    "stop_order_type" => "stop_limit_order",
+                    "stop_order_type" => "stop_loss_order",
                     "stop_price" => strval(round($slPrice, 4)),
                     "limit_price" => strval(round($slPrice, 4))
                 ];

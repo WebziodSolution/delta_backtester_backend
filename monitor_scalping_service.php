@@ -225,12 +225,13 @@ function close_scalping_trade(PDO $db, array $account, array $order, string $exi
             $balanceUpdateStmt = $db->prepare("
                 UPDATE subscribe_strategys 
                 SET 
-                    current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl,
-                    peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl)
+                    current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl_1,
+                    peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl_2)
                 WHERE user_id = :uid AND strategy_id = 1 AND allocated_balance IS NOT NULL
             ");
             $balanceUpdateStmt->execute([
-                'net_pnl' => $netTradePnl,
+                'net_pnl_1' => $netTradePnl,
+                'net_pnl_2' => $netTradePnl,
                 'uid' => $userId
             ]);
 

@@ -264,12 +264,13 @@ function close_option_buying_trade(PDO $db, array $account, array $order, string
             $balanceUpdateStmt = $db->prepare("
                 UPDATE subscribe_strategys 
                 SET 
-                    current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl,
-                    peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl)
+                    current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl_1,
+                    peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl_2)
                 WHERE user_id = :uid AND strategy_id = :strat_id AND allocated_balance IS NOT NULL
             ");
             $balanceUpdateStmt->execute([
-                'net_pnl' => $netTradePnl,
+                'net_pnl_1' => $netTradePnl,
+                'net_pnl_2' => $netTradePnl,
                 'uid' => $userId,
                 'strat_id' => STRATEGY_ID
             ]);
@@ -452,8 +453,8 @@ function check_and_monitor_option_buying_trades(): void {
                            ->execute(['exit_amount' => round($avgExitPrice, 4), 'broker_fees' => round($brokerFeesVal, 4), 'pnl' => round($pnlVal, 4), 'id' => $order['id']]);
 
                         // Update virtual balance
-                        $db->prepare("UPDATE subscribe_strategys SET current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl, peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl) WHERE user_id = :uid AND strategy_id = :strat_id AND allocated_balance IS NOT NULL")
-                           ->execute(['net_pnl' => $netTradePnl, 'uid' => $userId, 'strat_id' => STRATEGY_ID]);
+                        $db->prepare("UPDATE subscribe_strategys SET current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl_1, peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl_2) WHERE user_id = :uid AND strategy_id = :strat_id AND allocated_balance IS NOT NULL")
+                           ->execute(['net_pnl_1' => $netTradePnl, 'net_pnl_2' => $netTradePnl, 'uid' => $userId, 'strat_id' => STRATEGY_ID]);
 
                         // Send success email
                         if ($userEmail) {
@@ -518,8 +519,8 @@ function check_and_monitor_option_buying_trades(): void {
                            ->execute(['exit_amount' => round($avgExitPrice, 4), 'broker_fees' => round($brokerFeesVal, 4), 'pnl' => round($pnlVal, 4), 'id' => $order['id']]);
 
                         // Update virtual balance
-                        $db->prepare("UPDATE subscribe_strategys SET current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl, peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl) WHERE user_id = :uid AND strategy_id = :strat_id AND allocated_balance IS NOT NULL")
-                           ->execute(['net_pnl' => $netTradePnl, 'uid' => $userId, 'strat_id' => STRATEGY_ID]);
+                        $db->prepare("UPDATE subscribe_strategys SET current_balance = COALESCE(current_balance, allocated_balance) + :net_pnl_1, peak_balance = GREATEST(COALESCE(peak_balance, allocated_balance), COALESCE(current_balance, allocated_balance) + :net_pnl_2) WHERE user_id = :uid AND strategy_id = :strat_id AND allocated_balance IS NOT NULL")
+                           ->execute(['net_pnl_1' => $netTradePnl, 'net_pnl_2' => $netTradePnl, 'uid' => $userId, 'strat_id' => STRATEGY_ID]);
 
                         // Send email
                         if ($userEmail) {
