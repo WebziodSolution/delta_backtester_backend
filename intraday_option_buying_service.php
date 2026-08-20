@@ -576,32 +576,42 @@ function run_intraday_option_buying_strategy(): void {
                 }
                 $tpPrice = $avgFillPrice + ($tpAmount / $actualQty);
 
-                log_message("Filled Entry Avg Price: \${$avgFillPrice}. Re-calculated TP Price: \${$tpPrice}. Target SL Price: \${$slPrice}");
+                $tpTrigger = round($tpPrice, 2);
+                $tpLimit = round($tpPrice + 0.50, 2);
+                $slTrigger = round($slPrice, 2);
+                $slLimit = round($slPrice - 0.50, 2);
+                if ($slLimit <= 0) {
+                    $slLimit = 0.01;
+                }
+
+                log_message("Filled Entry Avg Price: \${$avgFillPrice}. TP Trigger: \${$tpTrigger}, Limit: \${$tpLimit}. SL Trigger: \${$slTrigger}, Limit: \${$slLimit}");
 
                 // 11. Place Direct Exchange SL/TP Limit Orders
-                // A. Take Profit Limit Order
+                // A. Take Profit Stop Limit Order
                 $tpParams = [
-                    "limit_price" => strval(round($tpPrice, 4))
+                    "stop_order_type" => "take_profit_order",
+                    "stop_price" => strval($tpTrigger),
+                    "limit_price" => strval($tpLimit)
                 ];
-                log_message("Placing live Take Profit Limit Order at \${$tpPrice}...");
+                log_message("Placing live Take Profit Stop Limit Order at Trigger: \${$tpTrigger}, Limit: \${$tpLimit}...");
                 list($tpStatus, $tpResp) = $deltaClient->placeOrder($prodId, $qtyLots, "sell", "limit_order", true, $tpParams);
                 
                 $tpOrderId = null;
                 if (($tpStatus === 200 || $tpStatus === 201) && isset($tpResp['success']) && $tpResp['success']) {
                     $tpOrderId = $tpResp['result']['id'] ?? null;
-                    log_message("Take Profit limit order placed successfully. Order ID: {$tpOrderId}");
+                    log_message("Take Profit stop-limit order placed successfully. Order ID: {$tpOrderId}");
                 } else {
                     $tpError = $tpResp['message'] ?? $tpResp['error']['message'] ?? json_encode($tpResp);
-                    log_message("Failed to place Take Profit limit order on Exchange: {$tpError}", "ERROR");
+                    log_message("Failed to place Take Profit stop-limit order on Exchange: {$tpError}", "ERROR");
                 }
 
                 // B. Stop Loss Stop Limit Order
                 $slParams = [
                     "stop_order_type" => "stop_loss_order",
-                    "stop_price" => strval(round($slPrice, 4)),
-                    "limit_price" => strval(round($slPrice, 4))
+                    "stop_price" => strval($slTrigger),
+                    "limit_price" => strval($slLimit)
                 ];
-                log_message("Placing live Stop Loss Stop Limit Order at \${$slPrice}...");
+                log_message("Placing live Stop Loss Stop Limit Order at Trigger: \${$slTrigger}, Limit: \${$slLimit}...");
                 list($slStatus, $slResp) = $deltaClient->placeOrder($prodId, $qtyLots, "sell", "limit_order", true, $slParams);
 
                 $slOrderId = null;
@@ -619,14 +629,14 @@ function run_intraday_option_buying_strategy(): void {
                 $insertStmt->execute([
                     'order_id' => strval($orderId),
                     'order_name' => $chosenOption['symbol'],
-                    'entry_amount' => round($avgFillPrice, 4),
+                    'entry_amount' => round($avgFillPrice, 2),
                     'broker_fees' => round($totalFee, 4),
                     'qty' => $qtyLots,
                     'account_info_id' => $account['id'],
                     'user_id' => $userId,
                     'strat_id' => STRATEGY_ID,
-                    'tp_price' => round($tpPrice, 4),
-                    'sl_price' => round($slPrice, 4),
+                    'tp_price' => round($tpPrice, 2),
+                    'sl_price' => round($slPrice, 2),
                     'tp_order_id' => $tpOrderId ? strval($tpOrderId) : null,
                     'sl_order_id' => $slOrderId ? strval($slOrderId) : null
                 ]);
@@ -644,9 +654,9 @@ function run_intraday_option_buying_strategy(): void {
                           . "<li><strong>Trade Action:</strong> BUY ({$entrySignal} breakout setup)</li>"
                           . "<li><strong>Order ID:</strong> {$orderId}</li>"
                           . "<li><strong>Quantity (Lots):</strong> {$qtyLots} contracts ({$actualQty} {$asset})</li>"
-                          . "<li><strong>Average Entry Price:</strong> \$" . number_format($avgFillPrice, 4) . " USD</li>"
-                          . "<li><strong>Direct Take Profit Limit Order:</strong> " . ($tpOrderId ? "\${$tpPrice} (Order ID: {$tpOrderId})" : "FAILED to place on Exchange (will monitor manually)") . "</li>"
-                          . "<li><strong>Direct Stop Loss Stop Limit Order:</strong> " . ($slOrderId ? "\${$slPrice} (Order ID: {$slOrderId})" : "FAILED to place on Exchange (will monitor manually)") . "</li>"
+                          . "<li><strong>Average Entry Price:</strong> \$" . number_format($avgFillPrice, 2) . " USD</li>"
+                          . "<li><strong>Direct Take Profit Stop Limit Order:</strong> " . ($tpOrderId ? "Trigger \$" . number_format($tpTrigger, 2) . " / Limit \$" . number_format($tpLimit, 2) . " (Order ID: {$tpOrderId})" : "FAILED to place on Exchange (will monitor manually)") . "</li>"
+                          . "<li><strong>Direct Stop Loss Stop Limit Order:</strong> " . ($slOrderId ? "Trigger \$" . number_format($slTrigger, 2) . " / Limit \$" . number_format($slLimit, 2) . " (Order ID: {$slOrderId})" : "FAILED to place on Exchange (will monitor manually)") . "</li>"
                           . "<li><strong>Allocated Margin Limit:</strong> \$" . number_format($allocatedUsd, 2) . " USD</li>"
                           . "<li><strong>Required Margin:</strong> \$" . number_format($purchaseCost, 4) . " USD</li>"
                           . "</ul>"
@@ -660,8 +670,8 @@ function run_intraday_option_buying_strategy(): void {
                 }
 
             } else {
-                $errorMsg = $orderResp['message'] ?? $orderResp['error']['message'] ?? "Unknown API response error";
-                log_message("Failed to place entry market order for user {$username} on {$chosenOption['symbol']}. Error: {$errorMsg}", "ERROR");
+                $errorMsg = $orderResp['message'] ?? $orderResp['error']['message'] ?? $orderResp['error'] ?? (is_array($orderResp) ? json_encode($orderResp) : null) ?: "Unknown API response error";
+                log_message("Failed to place entry market order for user {$username} on {$chosenOption['symbol']}. Error: " . (is_string($errorMsg) ? $errorMsg : json_encode($errorMsg)), "ERROR");
 
                 if ($userEmail) {
                     $subject = "Intraday Option Buying Placement Failed - {$chosenOption['symbol']}";

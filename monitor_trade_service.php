@@ -261,8 +261,8 @@ function close_trade(PDO $db, array $account, array $order, bool $isProfit): voi
                 }
             }
         } else {
-            $errorDetail = $closeResp['message'] ?? $closeResp['error']['message'] ?? "Unknown API response error";
-            throw new Exception($errorDetail);
+            $errorDetail = $closeResp['message'] ?? $closeResp['error']['message'] ?? $closeResp['error'] ?? (is_array($closeResp) ? json_encode($closeResp) : null) ?: "Unknown API response error";
+            throw new Exception(is_string($errorDetail) ? $errorDetail : json_encode($errorDetail));
         }
     } catch (Exception $e) {
         $errorMsg = $e->getMessage();

@@ -306,8 +306,8 @@ function close_option_buying_trade(PDO $db, array $account, array $order, string
                 }
             }
         } else {
-            $errorDetail = $closeResp['message'] ?? $closeResp['error']['message'] ?? "Unknown API response error";
-            throw new Exception($errorDetail);
+            $errorDetail = $closeResp['message'] ?? $closeResp['error']['message'] ?? $closeResp['error'] ?? (is_array($closeResp) ? json_encode($closeResp) : null) ?: "Unknown API response error";
+            throw new Exception(is_string($errorDetail) ? $errorDetail : json_encode($errorDetail));
         }
     } catch (Exception $e) {
         $errorMsg = $e->getMessage();
@@ -415,12 +415,26 @@ function check_and_monitor_option_buying_trades(): void {
                 list($status, $tpDetails) = $deltaClient->getOrderById($tpOrderId);
                 if ($status === 200 && isset($tpDetails['success']) && $tpDetails['success']) {
                     $tpState = $tpDetails['result']['state'] ?? $tpDetails['result']['status'] ?? '';
-                    if ($tpState === 'filled') {
+                    if ($tpState === 'filled' || $tpState === 'closed') {
                         log_message("Take Profit order {$tpOrderId} hit and FILLED natively on exchange. Closing trade.");
                         
                         // Close order details
                         $avgExitPrice = floatval($tpDetails['result']['avg_fill_price'] ?? $tpDetails['result']['price'] ?? $tpPrice);
-                        $exitFees = floatval($tpDetails['result']['fee'] ?? 0.0);
+                        
+                        // Fetch fills to calculate exact exit fees
+                        $exitFees = 0.0;
+                        try {
+                            list($fillStatus, $fillResp) = $deltaClient->getFills();
+                            $fills = ($fillStatus === 200 && isset($fillResp['success']) && $fillResp['success']) ? ($fillResp['result'] ?? []) : [];
+                            foreach ($fills as $f) {
+                                if (strval($f['order_id'] ?? '') === strval($tpOrderId)) {
+                                    $exitFees += floatval($f['commission'] ?? $f['fee'] ?? 0.0);
+                                }
+                            }
+                        } catch (Exception $fillEx) {
+                            log_message("Failed to fetch fills for TP order fee: " . $fillEx->getMessage(), "WARNING");
+                        }
+
                         $originalFees = floatval($order['broker_fees'] ?? 0.0);
                         $brokerFeesVal = $originalFees + $exitFees;
 
@@ -481,12 +495,26 @@ function check_and_monitor_option_buying_trades(): void {
                 list($status, $slDetails) = $deltaClient->getOrderById($slOrderId);
                 if ($status === 200 && isset($slDetails['success']) && $slDetails['success']) {
                     $slState = $slDetails['result']['state'] ?? $slDetails['result']['status'] ?? '';
-                    if ($slState === 'filled') {
+                    if ($slState === 'filled' || $slState === 'closed') {
                         log_message("Stop Loss order {$slOrderId} hit and FILLED natively on exchange. Closing trade.");
 
                         // Close order details
                         $avgExitPrice = floatval($slDetails['result']['avg_fill_price'] ?? $slDetails['result']['price'] ?? $slPrice);
-                        $exitFees = floatval($slDetails['result']['fee'] ?? 0.0);
+                        
+                        // Fetch fills to calculate exact exit fees
+                        $exitFees = 0.0;
+                        try {
+                            list($fillStatus, $fillResp) = $deltaClient->getFills();
+                            $fills = ($fillStatus === 200 && isset($fillResp['success']) && $fillResp['success']) ? ($fillResp['result'] ?? []) : [];
+                            foreach ($fills as $f) {
+                                if (strval($f['order_id'] ?? '') === strval($slOrderId)) {
+                                    $exitFees += floatval($f['commission'] ?? $f['fee'] ?? 0.0);
+                                }
+                            }
+                        } catch (Exception $fillEx) {
+                            log_message("Failed to fetch fills for SL order fee: " . $fillEx->getMessage(), "WARNING");
+                        }
+
                         $originalFees = floatval($order['broker_fees'] ?? 0.0);
                         $brokerFeesVal = $originalFees + $exitFees;
 
